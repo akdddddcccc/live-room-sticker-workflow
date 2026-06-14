@@ -1,4 +1,4 @@
-import { computed, reactive } from "/vendor/vue.esm-browser.prod.js";
+import { computed, reactive } from "vue";
 import AIWorkflowDemo from "./components/AIWorkflowDemo.js";
 
 function getLang() {
