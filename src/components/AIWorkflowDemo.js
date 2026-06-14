@@ -1,4 +1,4 @@
-export default {
+﻿export default {
   name: "AIWorkflowDemo",
   props: {
     lang: {
@@ -20,12 +20,23 @@ export default {
       loadingTimer: null,
       loadingWordIndex: 0,
       apiBase: typeof window !== "undefined" && ["127.0.0.1", "localhost"].includes(window.location.hostname)
-        ? "http://127.0.0.1:8787"
+        ? (window.location.port === "48973" ? "" : "http://127.0.0.1:8787")
         : "",
+      localConfigAvailable: typeof window !== "undefined" && ["127.0.0.1", "localhost"].includes(window.location.hostname),
       apiStatus: {
         checked: false,
         online: false,
         hasOpenAIKey: false,
+        message: ""
+      },
+      workflowConfig: {
+        baseUrl: "https://api.ofox.io/v1",
+        provider: "Company API",
+        apiKey: "",
+        hasOpenAIKey: false,
+        outputFormat: "jpeg",
+        textLayerOutputFormat: "png",
+        saving: false,
         message: ""
       },
       referenceUrl: "",
@@ -44,6 +55,7 @@ export default {
         height: 1920
       },
       activeUploadTarget: "reference",
+      hoverUploadTarget: "",
       activeFadeTarget: "top",
       activeFusionMode: "fade",
       previewPeekTarget: "",
@@ -353,6 +365,7 @@ export default {
     this.resizeCompositionForDisplay();
     this.centerTextLayer();
     this.checkWorkflowServer();
+    this.loadWorkflowConfig();
     window.addEventListener("resize", this.resizeCompositionForDisplay);
     window.addEventListener("pointermove", this.moveOverlayInteraction);
     window.addEventListener("pointerup", this.endOverlayInteraction);
@@ -393,6 +406,56 @@ export default {
         this.statusText = this.labels.serviceOffline;
       }
     },
+    async loadWorkflowConfig() {
+      try {
+        const response = await fetch(`${this.apiBase}/api/ai-workflow/config`);
+        const data = await response.json();
+        if (!response.ok || !data.ok) return;
+        this.workflowConfig = {
+          ...this.workflowConfig,
+          baseUrl: data.baseUrl || this.workflowConfig.baseUrl,
+          provider: data.provider || this.workflowConfig.provider,
+          hasOpenAIKey: Boolean(data.hasOpenAIKey),
+          outputFormat: data.outputFormat || this.workflowConfig.outputFormat,
+          textLayerOutputFormat: data.textLayerOutputFormat || this.workflowConfig.textLayerOutputFormat
+        };
+      } catch {
+        this.workflowConfig.message = this.lang === "zh" ? "本地配置服务未连接" : "Local config service is offline";
+      }
+    },
+    async saveWorkflowConfig() {
+      this.workflowConfig.saving = true;
+      try {
+        const response = await fetch(`${this.apiBase}/api/ai-workflow/config`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            baseUrl: this.workflowConfig.baseUrl,
+            provider: this.workflowConfig.provider,
+            apiKey: this.workflowConfig.apiKey,
+            outputFormat: this.workflowConfig.outputFormat,
+            textLayerOutputFormat: this.workflowConfig.textLayerOutputFormat
+          })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.message || "Config save failed");
+        this.workflowConfig = {
+          ...this.workflowConfig,
+          apiKey: "",
+          hasOpenAIKey: Boolean(data.hasOpenAIKey),
+          outputFormat: data.outputFormat || this.workflowConfig.outputFormat,
+          textLayerOutputFormat: data.textLayerOutputFormat || this.workflowConfig.textLayerOutputFormat,
+          message: this.lang === "zh" ? "配置已保存，本次会话立即生效" : "Settings saved for this session"
+        };
+        await this.checkWorkflowServer();
+      } catch (error) {
+        this.workflowConfig.message = this.lang === "zh"
+          ? `配置保存失败：${error.message}`
+          : `Config save failed: ${error.message}`;
+      } finally {
+        this.workflowConfig.saving = false;
+      }
+    },
     async loadReference(event) {
       const file = event.target.files?.[0];
       if (!file) return;
@@ -407,11 +470,41 @@ export default {
       const file = imageItem.getAsFile();
       if (!file) return;
       event.preventDefault();
-      await this.setImageForTarget(this.activeUploadTarget || "reference", file, this.lang === "zh" ? "剪贴板图片" : "Clipboard image");
+      const target = this.hoverUploadTarget || this.activeUploadTarget || this.uploadTargetFromViewport() || "reference";
+      await this.setImageForTarget(target, file, this.lang === "zh" ? "剪贴板图片" : "Clipboard image");
     },
     setUploadTarget(target) {
       this.activeUploadTarget = target;
       if (target === "font") this.selectedFontStyle = "reference";
+    },
+    setHoverUploadTarget(target) {
+      this.hoverUploadTarget = target;
+      this.setUploadTarget(target);
+    },
+    clearHoverUploadTarget(target) {
+      if (this.hoverUploadTarget === target) this.hoverUploadTarget = "";
+    },
+    uploadTargetFromViewport() {
+      const candidates = [
+        ["liveRoom", "aiWorkflowLiveRoom"],
+        ["font", "aiWorkflowFontReference"],
+        ["reference", "aiWorkflowReference"]
+      ];
+      const viewportCenter = window.innerHeight / 2;
+      let bestTarget = "";
+      let bestDistance = Infinity;
+      for (const [target, id] of candidates) {
+        const input = document.getElementById(id);
+        const box = input?.closest(".ai-workflow-upload")?.getBoundingClientRect();
+        if (!box || box.bottom < 0 || box.top > window.innerHeight) continue;
+        const center = box.top + box.height / 2;
+        const distance = Math.abs(center - viewportCenter);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestTarget = target;
+        }
+      }
+      return bestTarget;
     },
     async setImageForTarget(target, file, fallbackName = "") {
       if (target === "font") {
@@ -647,7 +740,8 @@ export default {
           topStickerImage: this.stickerOutputs.top,
           referenceImage: this.stickerOutputs.top,
           fontReferenceImage,
-          sourceTypographyReferenceImage: this.extractTextStyleFromReference ? this.referenceDataUrl : ""
+          sourceTypographyReferenceImage: "",
+          useReferenceTextStyle: this.extractTextStyleFromReference
         });
         this.textLayerDraftOutput = data.assets?.whiteDraft || "";
         this.textLayerOutput = data.assets?.transparent || "";
@@ -1312,6 +1406,36 @@ export default {
         <p class="ai-service-status" :class="{ online: apiStatus.online, keyless: apiStatus.online && !apiStatus.hasOpenAIKey }">
           {{ apiStatus.message || statusText }}
         </p>
+        <div v-if="localConfigAvailable" class="ai-local-config">
+          <label>
+            <span>{{ lang === 'zh' ? '接口地址' : 'API URL' }}</span>
+            <input v-model="workflowConfig.baseUrl" type="text" autocomplete="off" />
+          </label>
+          <label>
+            <span>{{ lang === 'zh' ? 'API Key' : 'API Key' }}</span>
+            <input v-model="workflowConfig.apiKey" type="password" autocomplete="off" :placeholder="workflowConfig.hasOpenAIKey ? (lang === 'zh' ? '已保存，留空不修改' : 'Saved; leave blank to keep') : ''" />
+          </label>
+          <label>
+            <span>{{ lang === 'zh' ? '贴片格式' : 'Sticker format' }}</span>
+            <select v-model="workflowConfig.outputFormat">
+              <option value="jpeg">jpeg</option>
+              <option value="png">png</option>
+              <option value="webp">webp</option>
+            </select>
+          </label>
+          <label>
+            <span>{{ lang === 'zh' ? '文字格式' : 'Text format' }}</span>
+            <select v-model="workflowConfig.textLayerOutputFormat">
+              <option value="png">png</option>
+              <option value="jpeg">jpeg</option>
+              <option value="webp">webp</option>
+            </select>
+          </label>
+          <button type="button" @click="saveWorkflowConfig" :disabled="workflowConfig.saving">
+            {{ workflowConfig.saving ? (lang === 'zh' ? '保存中' : 'Saving') : (lang === 'zh' ? '保存本机配置' : 'Save settings') }}
+          </button>
+          <small>{{ workflowConfig.message }}</small>
+        </div>
       </div>
 
       <div class="ai-workflow-tabs" aria-label="Workflow steps">
@@ -1337,6 +1461,8 @@ export default {
               tabindex="0"
               @focus="setUploadTarget('reference')"
               @pointerdown="setUploadTarget('reference')"
+              @pointerenter="setHoverUploadTarget('reference')"
+              @pointerleave="clearHoverUploadTarget('reference')"
             >
               <input id="aiWorkflowReference" type="file" accept="image/*" @change="loadReference" />
               <img v-if="referenceUrl" :src="referenceUrl" alt="Reference preview" />
@@ -1423,6 +1549,8 @@ export default {
               tabindex="0"
               @focus="setUploadTarget('font')"
               @pointerdown="setUploadTarget('font')"
+              @pointerenter="setHoverUploadTarget('font')"
+              @pointerleave="clearHoverUploadTarget('font')"
             >
               <input id="aiWorkflowFontReference" type="file" accept="image/*" @change="loadFontReference" />
               <img v-if="fontReferenceUrl" :src="fontReferenceUrl" alt="Font reference preview" />
@@ -1510,6 +1638,8 @@ export default {
               tabindex="0"
               @focus="setUploadTarget('liveRoom')"
               @pointerdown="setUploadTarget('liveRoom')"
+              @pointerenter="setHoverUploadTarget('liveRoom')"
+              @pointerleave="clearHoverUploadTarget('liveRoom')"
             >
               <input id="aiWorkflowLiveRoom" type="file" accept="image/*" @change="loadLiveRoom" />
               <img v-if="liveRoomUrl" :src="liveRoomUrl" alt="Live-room upload preview" />
@@ -1657,3 +1787,4 @@ export default {
     </section>
   `
 };
+

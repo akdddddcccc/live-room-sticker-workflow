@@ -1,51 +1,56 @@
-# 自动化直播间贴片设计工作流
+# AI直播间贴片生成项目
 
-一个独立的 Vite / Vue 工具站，用于根据参考图生成直播间上贴、侧贴、下贴背景和文字图层，并导出可继续放进 Figma、Photoshop 或直播间搭建流程里的 PNG 素材。
+独立版直播间贴片生成工具。支持：
 
-## 本地预览
+- 根据参考图生成上贴、侧贴、下贴背景。
+- 生成文字贴片图层。
+- 上传无贴片直播间截图，预览融合效果并导出 PNG。
+- Web 部署和 Electron 桌面端打包。
+
+## 本地 Web 运行
 
 ```bash
 npm install
+copy .env.local.example .env.local
+npm run local:workflow
 npm run dev
 ```
 
-本地 AI 接口服务：
+真实 API Key 只放在 `.env.local` 或桌面端本机配置里，不提交到 GitHub。
+
+## Windows 桌面端
 
 ```bash
-npm run dev:workflow
+npm install
+npm --prefix desktop install
+npm run desktop:pack
 ```
 
-## EdgeOne 部署
-
-`edgeone.json` 已配置：
+输出目录：
 
 ```text
-Install command: npm install
-Build command: npm run build
-Output directory: ./dist
-Node version: 22.11.0
+desktop/dist/
 ```
 
-## 两套 API
+## macOS 桌面端
 
-个人预览站使用 OpenAI 官方 API：
+请在 Mac 上执行：
 
-```text
-OPENAI_PROVIDER_LABEL=OpenAI official
-OPENAI_API_KEY=<personal OpenAI API key>
-OPENAI_BASE_URL=https://api.openai.com/v1
-OPENAI_IMAGE_MODEL=gpt-image-2
-OPENAI_IMAGE_QUALITY=low
+```bash
+npm install
+npm --prefix desktop install
+npm run desktop:pack:mac
 ```
 
-单位镜像站使用单位 API：
+macOS 首次打包如果需要签名、公证，需要后续配置 Apple Developer 证书；内部测试可以先做未签名包。
 
-```text
+## 配置
+
+`.env.local.example` 默认使用公司接口地址：
+
+```env
+OPENAI_BASE_URL=https://api.ofox.io/v1
 OPENAI_PROVIDER_LABEL=Company API
-OPENAI_API_KEY=<company API key>
-OPENAI_BASE_URL=<company OpenAI-compatible base URL ending in /v1>
-OPENAI_IMAGE_MODEL=gpt-image-2
-OPENAI_IMAGE_QUALITY=low
 ```
 
-真实 key 只放在 EdgeOne 环境变量里，不要提交到 GitHub。
+桌面端启动后也可以直接在界面里填写 URL 和 Key。

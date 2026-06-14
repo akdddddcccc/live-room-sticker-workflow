@@ -1,0 +1,38 @@
+{
+  "name": "ai-live-room-sticker-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "main": "main.cjs",
+  "scripts": {
+    "dev": "electron .",
+    "pack": "electron-builder --win portable",
+    "pack:mac": "electron-builder --mac dmg"
+  },
+  "build": {
+    "appId": "cn.muyang.live-room-sticker-workflow",
+    "productName": "AI直播间贴片生成项目",
+    "files": [
+      "main.cjs",
+      "../dist/**/*",
+      "../scripts/**/*",
+      "../docs/**/*",
+      "../package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../.env.local.example",
+        "to": ".env.local.example"
+      }
+    ],
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        "portable"
+      ]
+    }
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
+  }
+}

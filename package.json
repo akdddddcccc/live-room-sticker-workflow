@@ -6,8 +6,12 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "dev:workflow": "node scripts/ai-workflow-server.mjs",
+    "local:workflow": "node scripts/run-local-workflow.mjs",
     "build": "vite build && node scripts/copy-static-assets.mjs",
-    "preview": "vite preview --host 127.0.0.1"
+    "preview": "vite preview --host 127.0.0.1",
+    "desktop:dev": "npm run build && npm --prefix desktop run dev",
+    "desktop:pack": "npm run build && npm --prefix desktop run pack",
+    "desktop:pack:mac": "npm run build && npm --prefix desktop run pack:mac"
   },
   "dependencies": {
     "vue": "3.5.24"

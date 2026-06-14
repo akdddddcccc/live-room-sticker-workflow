@@ -3,7 +3,4 @@ dist/
 .env
 .env.local
 .env.*.local
-assets/fonts/
-images/work/ai-workflow-font-presets/
-package-lock.json
 vendor/
