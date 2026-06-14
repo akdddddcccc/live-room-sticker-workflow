@@ -60,7 +60,7 @@ body {
 
 .standalone-workflow-shell {
   min-height: 100vh;
-  padding: clamp(18px, 3vw, 40px);
+  padding: 12px clamp(16px, 2vw, 28px) 24px;
   background: #f4f0e9;
   color: #1d2720;
 }
@@ -71,21 +71,23 @@ body {
   justify-content: space-between;
   gap: 24px;
   width: min(1440px, 100%);
-  margin: 0 auto 24px;
+  margin: 0 auto 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(29, 39, 32, 0.18);
 }
 
 .standalone-workflow-header p {
-  margin: 0 0 8px;
+  margin: 0 0 4px;
   color: #58625c;
-  font-size: 14px;
+  font-size: 13px;
   letter-spacing: 0;
 }
 
 .standalone-workflow-header h1 {
   margin: 0;
   color: #1d2720;
-  font-size: clamp(28px, 5vw, 56px);
-  line-height: 0.96;
+  font-size: clamp(22px, 2.1vw, 28px);
+  line-height: 1;
   letter-spacing: 0;
 }
 
@@ -105,6 +107,45 @@ body {
 .standalone-workflow-header a.active {
   background: #1d2720;
   color: #fff;
+}
+
+.standalone-workflow-shell .task-map-demo {
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+.standalone-workflow-shell .task-map-demo__intro {
+  grid-template-columns: 1fr;
+  gap: 6px;
+  align-items: start;
+  margin-bottom: 10px;
+}
+
+.standalone-workflow-shell .task-map-demo__intro h2 {
+  font-size: clamp(22px, 2.3vw, 30px);
+  line-height: 1.04;
+}
+
+.standalone-workflow-shell .task-map-demo__kicker,
+.standalone-workflow-shell .task-map-demo__intro h2 {
+  display: none;
+}
+
+.standalone-workflow-shell .task-map-demo__intro p:not(.task-map-demo__kicker):not(.ai-service-status) {
+  display: none;
+}
+
+.standalone-workflow-shell .ai-service-status {
+  margin-top: 4px;
+}
+
+.standalone-workflow-shell .ai-local-config {
+  margin-top: 8px;
+  padding: 8px;
+}
+
+.standalone-workflow-shell .ai-workflow-tabs {
+  display: none;
 }
 
 img {
