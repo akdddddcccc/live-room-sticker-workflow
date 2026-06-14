@@ -20,7 +20,7 @@
       loadingTimer: null,
       loadingWordIndex: 0,
       apiBase: typeof window !== "undefined" && ["127.0.0.1", "localhost"].includes(window.location.hostname)
-        ? (window.location.port === "48973" ? "" : "http://127.0.0.1:8787")
+        ? (new URLSearchParams(window.location.search).get("desktop") === "1" ? "" : "http://127.0.0.1:8787")
         : "",
       localConfigAvailable: typeof window !== "undefined" && ["127.0.0.1", "localhost"].includes(window.location.hostname),
       apiStatus: {

@@ -2,6 +2,7 @@ const { app, BrowserWindow } = require("electron");
 const { createServer } = require("node:http");
 const { existsSync, readFileSync, statSync } = require("node:fs");
 const { extname, isAbsolute, join, resolve } = require("node:path");
+const { pathToFileURL } = require("node:url");
 
 function loadEnvFile(filePath) {
   if (!existsSync(filePath)) return;
@@ -36,15 +37,21 @@ function mimeType(filePath) {
   return types[extname(filePath).toLowerCase()] || "application/octet-stream";
 }
 
+function resourceRoot() {
+  return app.isPackaged ? process.resourcesPath : resolve(__dirname, "..");
+}
+
 async function startDesktopServer() {
-  const projectRoot = resolve(__dirname, "..");
-  loadEnvFile(resolve(projectRoot, ".env.local"));
+  const root = resourceRoot();
+  loadEnvFile(resolve(root, ".env.local"));
   if (process.env.AI_WORKFLOW_DOC_PATH && !isAbsolute(process.env.AI_WORKFLOW_DOC_PATH)) {
-    process.env.AI_WORKFLOW_DOC_PATH = resolve(projectRoot, process.env.AI_WORKFLOW_DOC_PATH);
+    process.env.AI_WORKFLOW_DOC_PATH = resolve(root, process.env.AI_WORKFLOW_DOC_PATH);
   }
-  const { route } = await import("../scripts/ai-workflow-server.mjs");
-  const distDir = resolve(projectRoot, "dist");
-  const port = Number(process.env.AI_WORKFLOW_DESKTOP_PORT || 48973);
+
+  const serverModuleUrl = pathToFileURL(resolve(root, "scripts", "ai-workflow-server.mjs")).href;
+  const { route } = await import(serverModuleUrl);
+  const distDir = resolve(root, "dist");
+  const requestedPort = process.env.AI_WORKFLOW_DESKTOP_PORT ? Number(process.env.AI_WORKFLOW_DESKTOP_PORT) : 0;
 
   const server = createServer((request, response) => {
     const url = new URL(request.url, `http://${request.headers.host}`);
@@ -66,8 +73,9 @@ async function startDesktopServer() {
     response.end(readFileSync(filePath));
   });
 
-  await new Promise((resolveListen) => server.listen(port, "127.0.0.1", resolveListen));
-  return { server, url: `http://127.0.0.1:${port}/#/zh/projects/vibe-coding` };
+  await new Promise((resolveListen) => server.listen(requestedPort, "127.0.0.1", resolveListen));
+  const port = server.address().port;
+  return { server, url: `http://127.0.0.1:${port}/?desktop=1#/zh` };
 }
 
 let desktopServer;

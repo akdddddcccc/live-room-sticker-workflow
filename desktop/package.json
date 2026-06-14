@@ -1,6 +1,6 @@
 {
   "name": "ai-live-room-sticker-desktop",
-  "version": "0.1.0",
+  "version": "0.1.3",
   "private": true,
   "main": "main.cjs",
   "scripts": {
@@ -13,12 +13,21 @@
     "productName": "AI直播间贴片生成项目",
     "files": [
       "main.cjs",
-      "../dist/**/*",
-      "../scripts/**/*",
-      "../docs/**/*",
-      "../package.json"
+      "package.json"
     ],
     "extraResources": [
+      {
+        "from": "../dist",
+        "to": "dist"
+      },
+      {
+        "from": "../scripts",
+        "to": "scripts"
+      },
+      {
+        "from": "../docs",
+        "to": "docs"
+      },
       {
         "from": "../.env.local.example",
         "to": ".env.local.example"

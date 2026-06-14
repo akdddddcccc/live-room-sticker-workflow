@@ -19,9 +19,7 @@ export default {
     });
 
     const title = computed(() => (
-      state.lang === "zh"
-        ? "自动化直播间贴片设计工作流"
-        : "Automated Live-room Sticker Design Workflow"
+      "AI直播间贴片生成项目"
     ));
 
     return {
