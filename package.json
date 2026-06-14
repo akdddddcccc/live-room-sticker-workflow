@@ -1,0 +1,18 @@
+{
+  "name": "automated-live-room-sticker-workflow",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "dev:workflow": "node scripts/ai-workflow-server.mjs",
+    "build": "vite build && node scripts/copy-static-assets.mjs",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "vue": "3.5.24"
+  },
+  "devDependencies": {
+    "vite": "5.4.19"
+  }
+}
