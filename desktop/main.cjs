@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, net } = require("electron");
 const { createServer } = require("node:http");
 const { existsSync, readFileSync, statSync } = require("node:fs");
 const { extname, isAbsolute, join, resolve } = require("node:path");
@@ -41,12 +41,34 @@ function resourceRoot() {
   return app.isPackaged ? process.resourcesPath : resolve(__dirname, "..");
 }
 
+function installDesktopFetch() {
+  if (!net?.fetch || global.__AI_WORKFLOW_DESKTOP_FETCH_INSTALLED__) return;
+  const nodeFetch = global.fetch?.bind(globalThis);
+  global.__AI_WORKFLOW_DESKTOP_FETCH_INSTALLED__ = true;
+  global.fetch = (input, init) => {
+    const targetUrl = typeof input === "string"
+      ? input
+      : input && typeof input.url === "string"
+        ? input.url
+        : "";
+    if (/^https?:\/\//i.test(targetUrl)) {
+      return net.fetch(input, init);
+    }
+    if (nodeFetch) return nodeFetch(input, init);
+    return net.fetch(input, init);
+  };
+}
+
 async function startDesktopServer() {
   const root = resourceRoot();
+  const userEnvPath = resolve(app.getPath("userData"), ".env.local");
   loadEnvFile(resolve(root, ".env.local"));
+  loadEnvFile(userEnvPath);
+  process.env.AI_WORKFLOW_ENV_PATH = userEnvPath;
   if (process.env.AI_WORKFLOW_DOC_PATH && !isAbsolute(process.env.AI_WORKFLOW_DOC_PATH)) {
     process.env.AI_WORKFLOW_DOC_PATH = resolve(root, process.env.AI_WORKFLOW_DOC_PATH);
   }
+  installDesktopFetch();
 
   const serverModuleUrl = pathToFileURL(resolve(root, "scripts", "ai-workflow-server.mjs")).href;
   const { route } = await import(serverModuleUrl);
