@@ -683,7 +683,8 @@
               lang: this.lang,
               kind,
               promptText: this.promptText,
-              referenceImage: referenceImageForRun
+              referenceImage: referenceImageForRun,
+              seriesReferenceImage: kind === "top" ? "" : this.stickerOutputs.top
             });
             this.stickerOutputs = {
               ...this.stickerOutputs,

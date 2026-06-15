@@ -433,11 +433,12 @@ function normalizeStickerImageSize(dataUrl, kind) {
   return `data:image/png;base64,${encodeRgbaToPng(normalized).toString("base64")}`;
 }
 
-async function requestCheckedStickerImage(kind, prompt, referenceImage, editSize) {
+async function requestCheckedStickerImage(kind, prompt, referenceImage, editSize, referenceImages) {
   const image = await requestOpenAIImage({
     prompt,
     size: stickerSpecs[kind].size,
     referenceImage,
+    referenceImages,
     editSize,
     outputFormat: imageOutputFormat()
   });
@@ -446,15 +447,19 @@ async function requestCheckedStickerImage(kind, prompt, referenceImage, editSize
   return normalizeStickerImageSize(dataUrl, kind);
 }
 
-async function requestStickerImage(kind, prompt, referenceImage) {
+async function requestStickerImage(kind, prompt, referenceImage, options = {}) {
   const failedAttempts = [];
+  const preferredReferenceImages = Array.isArray(options.referenceImages)
+    ? options.referenceImages.filter(Boolean)
+    : [];
   const tryAttempt = async (label, options = {}) => {
     try {
       return await requestCheckedStickerImage(
         kind,
         options.prompt || prompt,
         options.referenceImage ?? referenceImage,
-        options.editSize
+        options.editSize,
+        options.referenceImages
       );
     } catch (error) {
       failedAttempts.push(`${label}: ${error.message || "failed"}`);
@@ -462,18 +467,38 @@ async function requestStickerImage(kind, prompt, referenceImage) {
     }
   };
 
-  const directResult = await tryAttempt("reference edit");
+  const directResult = await tryAttempt(
+    preferredReferenceImages.length > 1 ? "reference edit with series source" : "reference edit",
+    preferredReferenceImages.length ? { referenceImages: preferredReferenceImages } : {}
+  );
   if (directResult) return { image: directResult, warning: "" };
+
+  if (preferredReferenceImages.length > 1) {
+    const originalOnlyResult = await tryAttempt("reference edit original only");
+    if (originalOnlyResult) {
+      return {
+        image: originalOnlyResult,
+        warning: `${stickerSpecs[kind].zhName} 的双参考图生图失败，已只用原始参考图重试；套系一致性可能降低。`
+      };
+    }
+  }
 
   const requestedEditSize = IMAGE_EDIT_SIZE || stickerSpecs[kind].size;
   if (useImageEdits() && referenceImage && IMAGE_EDIT_FALLBACK_SIZE && requestedEditSize !== IMAGE_EDIT_FALLBACK_SIZE) {
-    const squareResult = await tryAttempt(`reference edit ${IMAGE_EDIT_FALLBACK_SIZE}`, { editSize: IMAGE_EDIT_FALLBACK_SIZE });
+    const squareResult = await tryAttempt(`reference edit ${IMAGE_EDIT_FALLBACK_SIZE}`, {
+      editSize: IMAGE_EDIT_FALLBACK_SIZE,
+      referenceImages: preferredReferenceImages.length ? preferredReferenceImages : undefined
+    });
     if (squareResult) {
       return {
         image: squareResult,
         warning: `${stickerSpecs[kind].zhName} 的原比例图生图失败，已用 ${IMAGE_EDIT_FALLBACK_SIZE} 兼容尺寸生成并裁成贴片比例。`
       };
     }
+  }
+
+  if (useImageEdits() && referenceImage) {
+    throw new Error(failedAttempts.join(" / ") || "Reference image edit failed");
   }
 
   const generationPrompt = [
@@ -825,10 +850,18 @@ async function handleStickerBackgrounds(body) {
   const results = {};
   const errors = {};
   const warnings = {};
+  const referenceImagesForKind = (kind) => {
+    const seriesReferenceImage = body.seriesReferenceImage || "";
+    return kind === "top" || !seriesReferenceImage
+      ? [body.referenceImage].filter(Boolean)
+      : [body.referenceImage, seriesReferenceImage].filter(Boolean);
+  };
 
   if (singleKind) {
     try {
-      const result = await requestStickerImage(singleKind, prompts[singleKind], body.referenceImage);
+      const result = await requestStickerImage(singleKind, prompts[singleKind], body.referenceImage, {
+        referenceImages: referenceImagesForKind(singleKind)
+      });
       results[singleKind] = result.image;
       if (result.warning) warnings[singleKind] = result.warning;
     } catch (error) {
@@ -838,7 +871,9 @@ async function handleStickerBackgrounds(body) {
   } else if (GENERATION_MODE === "parallel") {
     const settled = await Promise.allSettled(kinds.map(async (kind) => [
       kind,
-      await requestStickerImage(kind, prompts[kind], body.referenceImage)
+      await requestStickerImage(kind, prompts[kind], body.referenceImage, {
+        referenceImages: referenceImagesForKind(kind)
+      })
     ]));
 
     settled.forEach((result, index) => {
@@ -854,7 +889,9 @@ async function handleStickerBackgrounds(body) {
   } else {
     for (const kind of kinds) {
       try {
-        const result = await requestStickerImage(kind, prompts[kind], body.referenceImage);
+        const result = await requestStickerImage(kind, prompts[kind], body.referenceImage, {
+          referenceImages: referenceImagesForKind(kind)
+        });
         results[kind] = result.image;
         if (result.warning) warnings[kind] = result.warning;
       } catch (error) {
