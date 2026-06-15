@@ -50,6 +50,7 @@ function textLayerOutputFormat() {
 }
 
 function useImageEdits() {
+  if (openAIBaseUrl().includes("api.openai.com")) return true;
   return process.env.OPENAI_IMAGE_USE_EDITS === undefined
     ? DEFAULT_IMAGE_USE_EDITS
     : process.env.OPENAI_IMAGE_USE_EDITS !== "0";
@@ -1138,4 +1139,3 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.log(`OpenAI key: ${openAIKey() ? "configured" : "missing, local SVG fallback enabled"}`);
   });
 }
-
