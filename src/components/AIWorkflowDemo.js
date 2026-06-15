@@ -523,7 +523,18 @@
       this.referenceUrl = this.referenceObjectUrl;
       this.referenceDataUrl = await this.fileToDataUrl(file);
       this.referenceName = file.name || fallbackName;
+      this.resetReferenceDependentOutputs();
       this.statusText = this.lang === "zh" ? "参考图已载入" : "Reference loaded";
+    },
+    resetReferenceDependentOutputs() {
+      this.stickerOutputs = { top: "", side: "", bottom: "" };
+      this.stickerPrompts = { top: "", side: "", bottom: "" };
+      this.textLayerOutput = "";
+      this.textLayerDraftOutput = "";
+      this.textLayerPromptBuilt = "";
+      this.textLayerVerified = false;
+      this.sideLayerVisible = false;
+      this.previewPeekTarget = "";
     },
     async loadFontReference(event) {
       const file = event.target.files?.[0];
@@ -647,6 +658,7 @@
         return;
       }
       this.runningStep = "sticker-bg";
+      const referenceImageForRun = this.referenceDataUrl;
       this.statusText = this.lang === "zh"
         ? "正在按套组顺序生成上贴、侧贴、下贴，每张会单独请求以避免云端超时..."
         : "Generating the sticker set one by one to avoid cloud timeouts...";
@@ -671,7 +683,7 @@
               lang: this.lang,
               kind,
               promptText: this.promptText,
-              referenceImage: this.referenceDataUrl
+              referenceImage: referenceImageForRun
             });
             this.stickerOutputs = {
               ...this.stickerOutputs,
@@ -1787,4 +1799,3 @@
     </section>
   `
 };
-

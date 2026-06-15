@@ -11,7 +11,7 @@ const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || "gpt-image-2";
 const IMAGE_QUALITY = process.env.OPENAI_IMAGE_QUALITY || "low";
 const IMAGE_OUTPUT_FORMAT = process.env.OPENAI_IMAGE_OUTPUT_FORMAT || "png";
 const TEXT_LAYER_OUTPUT_FORMAT = process.env.OPENAI_TEXT_LAYER_OUTPUT_FORMAT || "png";
-const USE_IMAGE_EDITS = process.env.OPENAI_IMAGE_USE_EDITS === "1";
+const DEFAULT_IMAGE_USE_EDITS = process.env.OPENAI_IMAGE_USE_EDITS !== "0";
 const IMAGE_TIMEOUT_MS = Number(process.env.OPENAI_IMAGE_TIMEOUT_MS || 90000);
 const IMAGE_EDIT_FIELD = process.env.OPENAI_IMAGE_EDIT_FIELD || "image";
 const IMAGE_EDIT_SIZE = process.env.OPENAI_IMAGE_EDIT_SIZE || "";
@@ -47,6 +47,12 @@ function imageOutputFormat() {
 
 function textLayerOutputFormat() {
   return normalizeOutputFormat(process.env.OPENAI_TEXT_LAYER_OUTPUT_FORMAT || TEXT_LAYER_OUTPUT_FORMAT, "png");
+}
+
+function useImageEdits() {
+  return process.env.OPENAI_IMAGE_USE_EDITS === undefined
+    ? DEFAULT_IMAGE_USE_EDITS
+    : process.env.OPENAI_IMAGE_USE_EDITS !== "0";
 }
 
 const stickerSpecs = {
@@ -149,7 +155,7 @@ async function saveWorkflowConfig(body = {}) {
     `OPENAI_IMAGE_QUALITY=${IMAGE_QUALITY}`,
     `OPENAI_IMAGE_OUTPUT_FORMAT=${process.env.OPENAI_IMAGE_OUTPUT_FORMAT || IMAGE_OUTPUT_FORMAT}`,
     `OPENAI_TEXT_LAYER_OUTPUT_FORMAT=${process.env.OPENAI_TEXT_LAYER_OUTPUT_FORMAT || TEXT_LAYER_OUTPUT_FORMAT}`,
-    `OPENAI_IMAGE_USE_EDITS=${USE_IMAGE_EDITS ? "1" : "0"}`,
+    `OPENAI_IMAGE_USE_EDITS=${useImageEdits() ? "1" : "0"}`,
     `OPENAI_IMAGE_EDIT_FIELD=${IMAGE_EDIT_FIELD}`,
     `OPENAI_IMAGE_EDIT_INCLUDE_EXTRAS=${IMAGE_EDIT_INCLUDE_EXTRAS ? "1" : "0"}`,
     `OPENAI_IMAGE_TIMEOUT_MS=${IMAGE_TIMEOUT_MS}`,
@@ -239,7 +245,7 @@ async function requestOpenAIImage({ prompt, size, referenceImage, referenceImage
     : (referenceImage ? [referenceImage] : []);
 
   try {
-    if (USE_IMAGE_EDITS && inputImages.length) {
+    if (useImageEdits() && inputImages.length) {
       const imageFiles = inputImages.map((image, index) => dataUrlToUploadFile(image, index)).filter(Boolean);
       if (imageFiles.length) {
         const body = new FormData();
@@ -459,7 +465,7 @@ async function requestStickerImage(kind, prompt, referenceImage) {
   if (directResult) return { image: directResult, warning: "" };
 
   const requestedEditSize = IMAGE_EDIT_SIZE || stickerSpecs[kind].size;
-  if (USE_IMAGE_EDITS && referenceImage && IMAGE_EDIT_FALLBACK_SIZE && requestedEditSize !== IMAGE_EDIT_FALLBACK_SIZE) {
+  if (useImageEdits() && referenceImage && IMAGE_EDIT_FALLBACK_SIZE && requestedEditSize !== IMAGE_EDIT_FALLBACK_SIZE) {
     const squareResult = await tryAttempt(`reference edit ${IMAGE_EDIT_FALLBACK_SIZE}`, { editSize: IMAGE_EDIT_FALLBACK_SIZE });
     if (squareResult) {
       return {
@@ -800,7 +806,7 @@ async function handleStickerBackgrounds(body) {
       model: IMAGE_MODEL,
       quality: IMAGE_QUALITY,
       baseUrl: openAIBaseUrl(),
-      useImageEdits: USE_IMAGE_EDITS,
+      useImageEdits: useImageEdits(),
       timeoutMs: IMAGE_TIMEOUT_MS,
       imageEditField: IMAGE_EDIT_FIELD,
       imageEditSize: IMAGE_EDIT_SIZE || "per-sticker-size",
@@ -864,7 +870,7 @@ async function handleStickerBackgrounds(body) {
     model: IMAGE_MODEL,
     quality: IMAGE_QUALITY,
     baseUrl: openAIBaseUrl(),
-    useImageEdits: USE_IMAGE_EDITS,
+    useImageEdits: useImageEdits(),
     timeoutMs: IMAGE_TIMEOUT_MS,
     imageEditField: IMAGE_EDIT_FIELD,
     imageEditSize: IMAGE_EDIT_SIZE || "per-sticker-size",
@@ -1050,7 +1056,7 @@ async function workflowStatus() {
     quality: IMAGE_QUALITY,
     outputFormat: imageOutputFormat(),
     baseUrl: openAIBaseUrl(),
-    useImageEdits: USE_IMAGE_EDITS,
+    useImageEdits: useImageEdits(),
     timeoutMs: IMAGE_TIMEOUT_MS,
     imageEditField: IMAGE_EDIT_FIELD,
     imageEditSize: IMAGE_EDIT_SIZE || "per-sticker-size",
@@ -1132,5 +1138,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.log(`OpenAI key: ${openAIKey() ? "configured" : "missing, local SVG fallback enabled"}`);
   });
 }
-
 
