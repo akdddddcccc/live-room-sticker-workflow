@@ -959,7 +959,7 @@ async function handleTextLayer(body) {
     "The final image must be a clean white-background typography design draft, not a transparent image.",
     "Do not composite onto any reference image or recreate any reference background.",
     topStickerImage
-      ? "Reference image 1 is the generated top sticker. It is the primary visual source: inherit typography color direction, material feeling, brightness contrast, and small decorative accents around or attached to letters from this top sticker."
+      ? "Reference image 1 is the generated top sticker. It is the primary visual source for material feeling, brightness contrast, and small decorative accents around or attached to letters. Do not blindly copy its main palette into the main letter fill."
       : "",
     fontReferenceImage
       ? (fontReferenceSource === "preset"
@@ -972,14 +972,16 @@ async function handleTextLayer(body) {
     body.useReferenceTextStyle
       ? "The user asked to consider text-style cues from the original step-1 reference, but no extra source image is attached for stability. Infer only generic typography qualities that are already visible in the new top sticker and the selected typography route; do not introduce any old palette or scene residue."
       : "",
-    "The top sticker reference always wins for color, material direction, and small surrounding decorative elements.",
+    "The top sticker reference always wins for material direction and small surrounding decorative elements.",
     "Palette isolation: the original uploaded source image and any typography reference must never affect lettering color. They may not introduce old colors, previous palettes, background tones, product colors, or scene lighting into the new text layer.",
-    "Use only the newly generated top sticker as the palette source. If the top sticker is pale near its fade edge, sample color from its most saturated decorative/highlight areas instead of the faded white transition.",
-    "Color lock: choose lettering fill, outline, shadow, highlights, edge effects, and small accent strokes only from Reference image 1/top sticker or from neutral contrast needed for readability. Never borrow the color palette from a font reference or typography preset.",
+    "Contrast-first color adaptation: first judge whether the usable top-sticker background/ornament area is light or dark, ignoring pure white fade zones. If the top sticker reads light, pale, airy, or white-heavy, the main lettering fill must be deep charcoal, near-black, ink black, or another very dark neutral. If the top sticker reads dark, saturated, or heavy, the main lettering fill must be warm white, ivory, pearl, or another very light neutral.",
+    "This light/dark decision controls only color and small decorative elements, not the letterform route, font structure, copy, layout hierarchy, or stroke style.",
+    "Use Reference image 1/top sticker colors only for tiny accent strokes, sparkles, outlines, edge glints, shadows, or small attached ornaments. Do not use top-sticker accent colors as the dominant main letter fill when they reduce contrast.",
+    "Color lock: choose lettering fill from the contrast-first dark/bright neutral rule above. Choose outline, shadow, highlights, edge effects, and small accent strokes from Reference image 1/top sticker only when they help readability and local harmony. Never borrow the color palette from a font reference or typography preset.",
     "Letterform lock: the selected typography route controls silhouette, stroke structure, serif/brush/rounded character, and spacing. The top sticker reference must not collapse different typography routes into the same font style.",
     "The optional font reference never decides the background, global color, large ornaments, or non-text visual content.",
     "Do not recreate large color blocks, ribbons, watercolor backgrounds, geometric networks, poster scenes, people, products, logos, QR codes, labels, captions, slogans, signatures, or watermarks.",
-    "First judge the intended text placement brightness from the top sticker: light placement areas need darker lettering; dark or saturated placement areas need lighter lettering with strong outline, shadow, or contrast edge.",
+    "Before rendering, explicitly apply the contrast decision: light top sticker -> dark/black typography; dark top sticker -> light/white typography. Keep the decorative color details secondary.",
     "必须逐字保留以下原文案，不增删、不翻译、不改写，保留换行结构：",
     copyText,
     styleKey === "expressive"
