@@ -226,11 +226,22 @@ function extensionForMime(mime) {
   return "png";
 }
 
+function isSupportedReferenceMime(mime) {
+  return ["image/png", "image/jpeg", "image/webp"].includes(String(mime || "").toLowerCase());
+}
+
+function isSupportedReferenceDataUrl(dataUrl) {
+  if (!dataUrl || !dataUrl.startsWith("data:")) return false;
+  const match = dataUrl.match(/^data:([^;,]+);base64,/);
+  return Boolean(match && isSupportedReferenceMime(match[1]));
+}
+
 function dataUrlToUploadFile(dataUrl, index) {
   if (!dataUrl || !dataUrl.startsWith("data:")) return null;
   const match = dataUrl.match(/^data:([^;,]+);base64,(.+)$/);
   if (!match) return null;
   const mime = match[1] || "image/png";
+  if (!isSupportedReferenceMime(mime)) return null;
   const buffer = Buffer.from(match[2], "base64");
   const filename = `reference-${index + 1}.${extensionForMime(mime)}`;
   if (typeof File !== "undefined") {
@@ -857,7 +868,7 @@ async function handleStickerBackgrounds(body) {
   const warnings = {};
   const referenceImagesForKind = (kind) => {
     const seriesReferenceImage = body.seriesReferenceImage || "";
-    return kind === "top" || !seriesReferenceImage
+    return kind === "top" || !isSupportedReferenceDataUrl(seriesReferenceImage)
       ? [body.referenceImage].filter(Boolean)
       : [body.referenceImage, seriesReferenceImage].filter(Boolean);
   };

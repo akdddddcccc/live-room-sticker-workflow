@@ -684,7 +684,7 @@
               kind,
               promptText: this.promptText,
               referenceImage: referenceImageForRun,
-              seriesReferenceImage: kind === "top" ? "" : this.stickerOutputs.top
+              seriesReferenceImage: kind === "top" ? "" : this.rasterStickerReference(this.stickerOutputs.top)
             });
             this.stickerOutputs = {
               ...this.stickerOutputs,
@@ -733,6 +733,9 @@
       } finally {
         this.runningStep = "";
       }
+    },
+    rasterStickerReference(source) {
+      return /^data:image\/(?:png|jpeg|webp);base64,/i.test(source || "") ? source : "";
     },
     async runTextLayer() {
       if (!this.stickerOutputs.top) {
