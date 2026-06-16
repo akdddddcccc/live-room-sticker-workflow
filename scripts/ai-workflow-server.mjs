@@ -13,7 +13,7 @@ const IMAGE_OUTPUT_FORMAT = process.env.OPENAI_IMAGE_OUTPUT_FORMAT || "png";
 const TEXT_LAYER_OUTPUT_FORMAT = process.env.OPENAI_TEXT_LAYER_OUTPUT_FORMAT || "png";
 const DEFAULT_IMAGE_USE_EDITS = process.env.OPENAI_IMAGE_USE_EDITS !== "0";
 const IMAGE_TIMEOUT_MS = Number(process.env.OPENAI_IMAGE_TIMEOUT_MS || 90000);
-const IMAGE_EDIT_FIELD = process.env.OPENAI_IMAGE_EDIT_FIELD || "image";
+const IMAGE_EDIT_FIELD = process.env.OPENAI_IMAGE_EDIT_FIELD || "";
 const IMAGE_EDIT_SIZE = process.env.OPENAI_IMAGE_EDIT_SIZE || "";
 const IMAGE_EDIT_FALLBACK_SIZE = process.env.OPENAI_IMAGE_EDIT_FALLBACK_SIZE || (OPENAI_BASE_URL.includes("api.ofox.io") ? "1024x1024" : "");
 const IMAGE_EDIT_INCLUDE_EXTRAS = process.env.OPENAI_IMAGE_EDIT_INCLUDE_EXTRAS === "1";
@@ -54,6 +54,11 @@ function useImageEdits() {
   return process.env.OPENAI_IMAGE_USE_EDITS === undefined
     ? DEFAULT_IMAGE_USE_EDITS
     : process.env.OPENAI_IMAGE_USE_EDITS !== "0";
+}
+
+function imageEditField() {
+  if (openAIBaseUrl().includes("api.openai.com")) return "image[]";
+  return process.env.OPENAI_IMAGE_EDIT_FIELD || IMAGE_EDIT_FIELD || "image";
 }
 
 const stickerSpecs = {
@@ -157,7 +162,7 @@ async function saveWorkflowConfig(body = {}) {
     `OPENAI_IMAGE_OUTPUT_FORMAT=${process.env.OPENAI_IMAGE_OUTPUT_FORMAT || IMAGE_OUTPUT_FORMAT}`,
     `OPENAI_TEXT_LAYER_OUTPUT_FORMAT=${process.env.OPENAI_TEXT_LAYER_OUTPUT_FORMAT || TEXT_LAYER_OUTPUT_FORMAT}`,
     `OPENAI_IMAGE_USE_EDITS=${useImageEdits() ? "1" : "0"}`,
-    `OPENAI_IMAGE_EDIT_FIELD=${IMAGE_EDIT_FIELD}`,
+    `OPENAI_IMAGE_EDIT_FIELD=${imageEditField()}`,
     `OPENAI_IMAGE_EDIT_INCLUDE_EXTRAS=${IMAGE_EDIT_INCLUDE_EXTRAS ? "1" : "0"}`,
     `OPENAI_IMAGE_TIMEOUT_MS=${IMAGE_TIMEOUT_MS}`,
     `AI_WORKFLOW_GENERATION_MODE=${GENERATION_MODE}`,
@@ -258,7 +263,7 @@ async function requestOpenAIImage({ prompt, size, referenceImage, referenceImage
           body.append("output_format", outputFormat);
         }
         imageFiles.forEach((imageFile, index) => {
-          body.append(IMAGE_EDIT_FIELD, imageFile, imageFile.name || `reference-${index + 1}.png`);
+          body.append(imageEditField(), imageFile, imageFile.name || `reference-${index + 1}.png`);
         });
         const response = await fetch(`${baseUrl}/images/edits`, {
           method: "POST",
@@ -834,7 +839,7 @@ async function handleStickerBackgrounds(body) {
       baseUrl: openAIBaseUrl(),
       useImageEdits: useImageEdits(),
       timeoutMs: IMAGE_TIMEOUT_MS,
-      imageEditField: IMAGE_EDIT_FIELD,
+      imageEditField: imageEditField(),
       imageEditSize: IMAGE_EDIT_SIZE || "per-sticker-size",
       imageEditFallbackSize: IMAGE_EDIT_FALLBACK_SIZE || "off",
       imageEditIncludeExtras: IMAGE_EDIT_INCLUDE_EXTRAS,
@@ -910,7 +915,7 @@ async function handleStickerBackgrounds(body) {
     baseUrl: openAIBaseUrl(),
     useImageEdits: useImageEdits(),
     timeoutMs: IMAGE_TIMEOUT_MS,
-    imageEditField: IMAGE_EDIT_FIELD,
+    imageEditField: imageEditField(),
     imageEditSize: IMAGE_EDIT_SIZE || "per-sticker-size",
     imageEditFallbackSize: IMAGE_EDIT_FALLBACK_SIZE || "off",
     imageEditIncludeExtras: IMAGE_EDIT_INCLUDE_EXTRAS,
@@ -1096,7 +1101,7 @@ async function workflowStatus() {
     baseUrl: openAIBaseUrl(),
     useImageEdits: useImageEdits(),
     timeoutMs: IMAGE_TIMEOUT_MS,
-    imageEditField: IMAGE_EDIT_FIELD,
+    imageEditField: imageEditField(),
     imageEditSize: IMAGE_EDIT_SIZE || "per-sticker-size",
     imageEditFallbackSize: IMAGE_EDIT_FALLBACK_SIZE || "off",
     imageEditIncludeExtras: IMAGE_EDIT_INCLUDE_EXTRAS,
@@ -1171,7 +1176,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.log(`OpenAI base URL: ${openAIBaseUrl()}`);
     console.log(`Image model: ${IMAGE_MODEL}`);
     console.log(`Image timeout: ${IMAGE_TIMEOUT_MS}ms`);
-    console.log(`Image edit field: ${IMAGE_EDIT_FIELD}`);
+    console.log(`Image edit field: ${imageEditField()}`);
     console.log(`Generation mode: ${GENERATION_MODE}`);
     console.log(`OpenAI key: ${openAIKey() ? "configured" : "missing, local SVG fallback enabled"}`);
   });
