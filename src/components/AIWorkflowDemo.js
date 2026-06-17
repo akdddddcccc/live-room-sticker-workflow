@@ -1,4 +1,18 @@
-﻿export default {
+﻿// Resolve the workflow backend origin. window.__AI_WORKFLOW_API_BASE__ (set in
+// index.html per deployment) lets this static build point at the unit server
+// without rebuilding. Falls back to localhost dev, then same-origin.
+function resolveApiBase() {
+  if (typeof window === "undefined") return "";
+  const override = window.__AI_WORKFLOW_API_BASE__;
+  if (typeof override === "string" && override.trim()) return override.trim().replace(/\/+$/, "");
+  const isLocal = ["127.0.0.1", "localhost"].includes(window.location.hostname);
+  if (isLocal) {
+    return new URLSearchParams(window.location.search).get("desktop") === "1" ? "" : "http://127.0.0.1:8787";
+  }
+  return "";
+}
+
+export default {
   name: "AIWorkflowDemo",
   props: {
     lang: {
@@ -19,9 +33,7 @@
       runningStep: "",
       loadingTimer: null,
       loadingWordIndex: 0,
-      apiBase: typeof window !== "undefined" && ["127.0.0.1", "localhost"].includes(window.location.hostname)
-        ? (new URLSearchParams(window.location.search).get("desktop") === "1" ? "" : "http://127.0.0.1:8787")
-        : "",
+      apiBase: resolveApiBase(),
       localConfigAvailable: typeof window !== "undefined" && ["127.0.0.1", "localhost"].includes(window.location.hostname),
       apiStatus: {
         checked: false,

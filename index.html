@@ -10,6 +10,14 @@
   </head>
   <body>
     <div id="app"></div>
+    <!--
+      Workflow backend origin (unit instance U, relay-only). Set to the unit
+      server's public HTTPS URL, e.g. "https://api.your-unit-domain.com".
+      Leave empty for same-origin.
+    -->
+    <script>
+      window.__AI_WORKFLOW_API_BASE__ = "";
+    </script>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

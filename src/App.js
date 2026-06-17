@@ -31,7 +31,7 @@ export default {
     <main class="standalone-workflow-shell">
       <header class="standalone-workflow-header">
         <div>
-          <p>MUYANG × NOBOOK</p>
+          <p>NOBOOK</p>
           <h1>{{ title }}</h1>
         </div>
         <nav aria-label="Language">
