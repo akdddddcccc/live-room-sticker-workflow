@@ -1,12 +1,49 @@
 ﻿import { createServer } from "node:http";
-import { readFile, writeFile } from "node:fs/promises";
-import { pathToFileURL } from "node:url";
+import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { pathToFileURL, fileURLToPath } from "node:url";
+import { dirname } from "node:path";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { randomUUID } from "node:crypto";
 import { deflateSync, inflateSync } from "node:zlib";
 
 const PORT = Number(process.env.AI_WORKFLOW_PORT || 8787);
+const HOST = process.env.AI_WORKFLOW_HOST || "127.0.0.1";
 const API_KEY = process.env.OPENAI_API_KEY || "";
 const OPENAI_BASE_URL = (process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
 const OPENAI_PROVIDER_LABEL = process.env.OPENAI_PROVIDER_LABEL || (OPENAI_BASE_URL.includes("api.openai.com") ? "OpenAI official" : "Custom OpenAI-compatible API");
+
+// --- Visitor quota / dual-provider routing (opt-in via QUOTA_ENABLED=1) ---
+// When disabled (default) the server behaves exactly as before: single global
+// provider read from OPENAI_* env. When enabled, each visitor gets QUOTA_CALLS
+// image calls on the official provider, then automatically falls back to the
+// relay provider (FALLBACK_OPENAI_*). Channel is decided by deployment env,
+// not by sniffing the request host, so the two deployments stay isolated.
+const QUOTA_ENABLED = process.env.QUOTA_ENABLED === "1";
+const QUOTA_CALLS = Number(process.env.QUOTA_CALLS || 20); // 5 rounds * 4 image calls
+const FALLBACK_OPENAI_BASE_URL = (process.env.FALLBACK_OPENAI_BASE_URL || "https://api.ofox.io/v1").replace(/\/+$/, "");
+const FALLBACK_OPENAI_API_KEY = process.env.FALLBACK_OPENAI_API_KEY || "";
+const FALLBACK_PROVIDER_LABEL = process.env.FALLBACK_PROVIDER_LABEL || "ofox relay";
+const QUOTA_STORE_PATH = process.env.QUOTA_STORE_PATH
+  ? new URL(`file://${process.env.QUOTA_STORE_PATH}`)
+  : new URL("../.data/visitor-quota.json", import.meta.url);
+
+// Per-request context: which provider to use + how many official calls this
+// visitor has spent. requestOpenAIImage() and the provider-aware edit helpers
+// read it, so the rest of the pipeline is untouched.
+const requestContext = new AsyncLocalStorage();
+
+function activeBaseUrl() {
+  const ctx = requestContext.getStore();
+  if (ctx && ctx.provider) return ctx.provider.baseUrl;
+  return openAIBaseUrl();
+}
+
+function activeProvider() {
+  const ctx = requestContext.getStore();
+  if (ctx && ctx.provider) return ctx.provider;
+  return { baseUrl: openAIBaseUrl(), apiKey: openAIKey(), label: openAIProviderLabel(), tier: "default" };
+}
 const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || "gpt-image-2";
 const IMAGE_QUALITY = process.env.OPENAI_IMAGE_QUALITY || "low";
 const IMAGE_OUTPUT_FORMAT = process.env.OPENAI_IMAGE_OUTPUT_FORMAT || "png";
@@ -50,15 +87,103 @@ function textLayerOutputFormat() {
 }
 
 function useImageEdits() {
-  if (openAIBaseUrl().includes("api.openai.com")) return true;
+  if (activeBaseUrl().includes("api.openai.com")) return true;
   return process.env.OPENAI_IMAGE_USE_EDITS === undefined
     ? DEFAULT_IMAGE_USE_EDITS
     : process.env.OPENAI_IMAGE_USE_EDITS !== "0";
 }
 
 function imageEditField() {
-  if (openAIBaseUrl().includes("api.openai.com")) return "image[]";
+  if (activeBaseUrl().includes("api.openai.com")) return "image[]";
   return process.env.OPENAI_IMAGE_EDIT_FIELD || IMAGE_EDIT_FIELD || "image";
+}
+
+function officialProvider() {
+  return { baseUrl: openAIBaseUrl(), apiKey: openAIKey(), label: openAIProviderLabel(), tier: "official" };
+}
+
+function fallbackProvider() {
+  return { baseUrl: FALLBACK_OPENAI_BASE_URL, apiKey: FALLBACK_OPENAI_API_KEY, label: FALLBACK_PROVIDER_LABEL, tier: "fallback" };
+}
+
+// --- Visitor quota store: a single JSON file guarded by a write queue. ---
+// Shape: { "<token>": { used: <number> } }. In-memory cache + serialized writes
+// via quotaWriteChain so concurrent image calls in one round cannot clobber each
+// other (single process). Swapping for SQLite later only touches these helpers.
+let quotaCache = null;
+let quotaWriteChain = Promise.resolve();
+
+function loadQuotaStore() {
+  if (quotaCache) return quotaCache;
+  try {
+    quotaCache = JSON.parse(readFileSync(QUOTA_STORE_PATH, "utf8")) || {};
+  } catch {
+    quotaCache = {};
+  }
+  return quotaCache;
+}
+
+function quotaUsed(token) {
+  if (!token) return 0;
+  const store = loadQuotaStore();
+  return store[token]?.used || 0;
+}
+
+function quotaRemaining(token) {
+  return Math.max(0, QUOTA_CALLS - quotaUsed(token));
+}
+
+function persistQuotaStore() {
+  const snapshot = JSON.stringify(quotaCache || {});
+  quotaWriteChain = quotaWriteChain.then(async () => {
+    const dir = dirname(fileURLToPath(QUOTA_STORE_PATH));
+    await mkdir(dir, { recursive: true });
+    const tmp = new URL(`${QUOTA_STORE_PATH.href}.tmp`);
+    await writeFile(tmp, snapshot, "utf8");
+    await rename(fileURLToPath(tmp), fileURLToPath(QUOTA_STORE_PATH));
+  }).catch(() => {});
+  return quotaWriteChain;
+}
+
+function incrementQuota(token) {
+  if (!token) return;
+  const store = loadQuotaStore();
+  const entry = store[token] || { used: 0 };
+  entry.used += 1;
+  store[token] = entry;
+  persistQuotaStore();
+}
+
+function anyImageProviderAvailable() {
+  if (openAIKey()) return true;
+  return QUOTA_ENABLED && Boolean(FALLBACK_OPENAI_API_KEY);
+}
+
+// Runs one logical image generation (fn may retry internally) under the right
+// provider. Official is used while the visitor has quota; on official error or
+// exhausted quota it transparently retries the same fn on the relay provider.
+// Quota is charged once per successful official logical image. Passthrough when
+// QUOTA_ENABLED is off so existing single-provider deployments are unchanged.
+async function generateWithQuota(token, fn) {
+  if (!QUOTA_ENABLED) return fn();
+
+  const hasOfficial = Boolean(openAIKey());
+  const hasFallback = Boolean(FALLBACK_OPENAI_API_KEY);
+  const canUseOfficial = hasOfficial && Boolean(token) && quotaRemaining(token) > 0;
+
+  if (canUseOfficial) {
+    try {
+      const result = await requestContext.run({ provider: officialProvider(), token }, fn);
+      incrementQuota(token);
+      return result;
+    } catch (error) {
+      if (!hasFallback) throw error;
+      return requestContext.run({ provider: fallbackProvider(), token }, fn);
+    }
+  }
+
+  if (hasFallback) return requestContext.run({ provider: fallbackProvider(), token }, fn);
+  return requestContext.run({ provider: officialProvider(), token }, fn);
 }
 
 const stickerSpecs = {
@@ -118,14 +243,25 @@ function workflowDocPromptBlock(workflowDoc) {
   ].join("\n");
 }
 
-function sendJson(response, statusCode, data) {
+function sendJson(response, statusCode, data, extraHeaders = {}) {
   response.writeHead(statusCode, {
     "Content-Type": "application/json; charset=utf-8",
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type"
+    "Access-Control-Allow-Headers": "Content-Type, X-Visitor-Token",
+    "Access-Control-Expose-Headers": "X-Visitor-Token",
+    ...extraHeaders
   });
   response.end(JSON.stringify(data));
+}
+
+// Visitor token identifies a quota bucket. Read it from the request header; if
+// absent (first visit) and quota is on, mint a new one. Returned to the client
+// via response body + header so the frontend can persist it in localStorage.
+function resolveVisitorToken(request) {
+  const raw = String(request.headers["x-visitor-token"] || "").trim();
+  if (/^[A-Za-z0-9_-]{8,64}$/.test(raw)) return raw;
+  return QUOTA_ENABLED ? randomUUID() : "";
 }
 
 function workflowConfig() {
@@ -253,8 +389,9 @@ function dataUrlToUploadFile(dataUrl, index) {
 }
 
 async function requestOpenAIImage({ prompt, size, referenceImage, referenceImages, editSize, outputFormat = imageOutputFormat() }) {
-  const baseUrl = openAIBaseUrl();
-  const headers = { Authorization: `Bearer ${openAIKey()}` };
+  const provider = activeProvider();
+  const baseUrl = provider.baseUrl;
+  const headers = { Authorization: `Bearer ${provider.apiKey}` };
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), IMAGE_TIMEOUT_MS);
   const inputImages = Array.isArray(referenceImages) && referenceImages.length
@@ -830,7 +967,7 @@ function removeConnectedWhiteBackground(dataUrl) {
   return `data:image/png;base64,${encodeRgbaToPng(png).toString("base64")}`;
 }
 
-async function handleStickerBackgrounds(body) {
+async function handleStickerBackgrounds(body, token = "") {
   const kinds = ["top", "side", "bottom"];
   const workflowDoc = await readWorkflowDoc();
   const prompts = Object.fromEntries(kinds.map((kind) => [
@@ -839,7 +976,7 @@ async function handleStickerBackgrounds(body) {
   ]));
   const singleKind = kinds.includes(body.kind) ? body.kind : "";
 
-  if (!openAIKey()) {
+  if (!anyImageProviderAvailable()) {
     const fallbackKinds = singleKind ? [singleKind] : kinds;
     return {
       ok: true,
@@ -875,9 +1012,9 @@ async function handleStickerBackgrounds(body) {
 
   if (singleKind) {
     try {
-      const result = await requestStickerImage(singleKind, prompts[singleKind], body.referenceImage, {
+      const result = await generateWithQuota(token, () => requestStickerImage(singleKind, prompts[singleKind], body.referenceImage, {
         referenceImages: referenceImagesForKind(singleKind)
-      });
+      }));
       results[singleKind] = result.image;
       if (result.warning) warnings[singleKind] = result.warning;
     } catch (error) {
@@ -887,9 +1024,9 @@ async function handleStickerBackgrounds(body) {
   } else if (GENERATION_MODE === "parallel") {
     const settled = await Promise.allSettled(kinds.map(async (kind) => [
       kind,
-      await requestStickerImage(kind, prompts[kind], body.referenceImage, {
+      await generateWithQuota(token, () => requestStickerImage(kind, prompts[kind], body.referenceImage, {
         referenceImages: referenceImagesForKind(kind)
-      })
+      }))
     ]));
 
     settled.forEach((result, index) => {
@@ -905,9 +1042,9 @@ async function handleStickerBackgrounds(body) {
   } else {
     for (const kind of kinds) {
       try {
-        const result = await requestStickerImage(kind, prompts[kind], body.referenceImage, {
+        const result = await generateWithQuota(token, () => requestStickerImage(kind, prompts[kind], body.referenceImage, {
           referenceImages: referenceImagesForKind(kind)
-        });
+        }));
         results[kind] = result.image;
         if (result.warning) warnings[kind] = result.warning;
       } catch (error) {
@@ -920,7 +1057,7 @@ async function handleStickerBackgrounds(body) {
   return {
     ok: true,
     openAIRequestOk: Object.keys(errors).length === 0,
-    generated: Boolean(openAIKey()) && Object.keys(errors).length === 0,
+    generated: anyImageProviderAvailable() && Object.keys(errors).length === 0,
     model: IMAGE_MODEL,
     quality: IMAGE_QUALITY,
     baseUrl: openAIBaseUrl(),
@@ -936,7 +1073,8 @@ async function handleStickerBackgrounds(body) {
     prompts,
     errors,
     warnings,
-    message: openAIKey()
+    quota: QUOTA_ENABLED ? { enabled: true, limit: QUOTA_CALLS, remaining: quotaRemaining(token) } : undefined,
+    message: anyImageProviderAvailable()
       ? (Object.keys(errors).length
         ? "OpenAI 生图失败，已回退成本地草稿。"
         : (Object.keys(warnings).length ? "贴片背景已生成，但部分图片使用了兼容重试路径。" : "贴片背景已生成。"))
@@ -944,7 +1082,7 @@ async function handleStickerBackgrounds(body) {
   };
 }
 
-async function handleTextLayer(body) {
+async function handleTextLayer(body, token = "") {
   const styleKey = body.styleKey === "expressive" ? "expressive" : "clean";
   const fontPresetKeys = new Set(["elegant-songti", "expressive-calligraphy", "rounded-cute"]);
   const fontPresetKey = fontPresetKeys.has(body.fontPresetKey) ? body.fontPresetKey : "";
@@ -1005,7 +1143,7 @@ async function handleTextLayer(body) {
   const fallbackTransparent = makeTextLayerSvg({ copyText, styleKey });
   const fallbackWhiteDraft = makeTextLayerSvg({ copyText, styleKey, background: "#ffffff" });
 
-  if (!openAIKey() || !TEXT_LAYER_USE_API) {
+  if ((!anyImageProviderAvailable()) || !TEXT_LAYER_USE_API) {
     return {
       ok: true,
       generated: false,
@@ -1019,36 +1157,38 @@ async function handleTextLayer(body) {
       prompt,
       model: IMAGE_MODEL,
       size: TEXT_LAYER_SIZE,
-      message: !openAIKey()
+      message: !anyImageProviderAvailable()
         ? "未检测到 OPENAI_API_KEY，已返回本地 SVG 文字图层草稿。"
         : "文字图层 API 已关闭，已返回本地 SVG 文字图层草稿。"
     };
   }
 
   try {
-    let referenceFallback = "";
-    let whiteDraft = "";
-    try {
-      whiteDraft = await requestOpenAIImage({
-        prompt,
-        size: TEXT_LAYER_SIZE,
-        referenceImages,
-        outputFormat: textLayerOutputFormat()
-      });
-    } catch (error) {
-      if (referenceImages.length < 2 || !topStickerImage) throw error;
-      referenceFallback = error.message || "Multi-reference image edit failed";
-      whiteDraft = await requestOpenAIImage({
-        prompt: [
+    const draftResult = { referenceFallback: "" };
+    const whiteDraft = await generateWithQuota(token, async () => {
+      try {
+        return await requestOpenAIImage({
           prompt,
-          "",
-          "The optional typography reference images could not be sent by the image gateway in this retry. Ignore them and rely on the top sticker plus the selected typography route."
-        ].join("\n"),
-        size: TEXT_LAYER_SIZE,
-        referenceImage: topStickerImage,
-        outputFormat: textLayerOutputFormat()
-      });
-    }
+          size: TEXT_LAYER_SIZE,
+          referenceImages,
+          outputFormat: textLayerOutputFormat()
+        });
+      } catch (error) {
+        if (referenceImages.length < 2 || !topStickerImage) throw error;
+        draftResult.referenceFallback = error.message || "Multi-reference image edit failed";
+        return requestOpenAIImage({
+          prompt: [
+            prompt,
+            "",
+            "The optional typography reference images could not be sent by the image gateway in this retry. Ignore them and rely on the top sticker plus the selected typography route."
+          ].join("\n"),
+          size: TEXT_LAYER_SIZE,
+          referenceImage: topStickerImage,
+          outputFormat: textLayerOutputFormat()
+        });
+      }
+    });
+    const referenceFallback = draftResult.referenceFallback;
     let transparent = fallbackTransparent;
     let cutoutOk = false;
     let cutoutError = "";
@@ -1074,6 +1214,7 @@ async function handleTextLayer(body) {
       model: IMAGE_MODEL,
       size: TEXT_LAYER_SIZE,
       referenceFallback,
+      quota: QUOTA_ENABLED ? { enabled: true, limit: QUOTA_CALLS, remaining: quotaRemaining(token) } : undefined,
       error: cutoutError || referenceFallback,
       message: cutoutOk
         ? (referenceFallback
@@ -1102,12 +1243,15 @@ async function handleTextLayer(body) {
 
 }
 
-async function workflowStatus() {
+async function workflowStatus(token = "") {
   const workflowDoc = await readWorkflowDoc();
   return {
     ok: true,
-    hasOpenAIKey: Boolean(openAIKey()),
+    hasOpenAIKey: Boolean(openAIKey()) || (QUOTA_ENABLED && Boolean(FALLBACK_OPENAI_API_KEY)),
     provider: openAIProviderLabel(),
+    quota: QUOTA_ENABLED
+      ? { enabled: true, limit: QUOTA_CALLS, used: quotaUsed(token), remaining: quotaRemaining(token), callsPerRound: 4 }
+      : { enabled: false },
     model: IMAGE_MODEL,
     quality: IMAGE_QUALITY,
     outputFormat: imageOutputFormat(),
@@ -1140,8 +1284,10 @@ async function route(request, response) {
   }
 
   const url = new URL(request.url, `http://${request.headers.host}`);
+  const visitorToken = resolveVisitorToken(request);
+  const tokenHeader = visitorToken ? { "X-Visitor-Token": visitorToken } : {};
   if (request.method === "GET" && url.pathname === "/api/ai-workflow/status") {
-    sendJson(response, 200, await workflowStatus());
+    sendJson(response, 200, await workflowStatus(visitorToken), tokenHeader);
     return;
   }
   if (request.method === "GET" && url.pathname === "/api/ai-workflow/config") {
@@ -1157,11 +1303,11 @@ async function route(request, response) {
   try {
     const body = await readRequestJson(request);
     if (url.pathname === "/api/ai-workflow/sticker-backgrounds") {
-      sendJson(response, 200, await handleStickerBackgrounds(body));
+      sendJson(response, 200, await handleStickerBackgrounds(body, visitorToken), tokenHeader);
       return;
     }
     if (url.pathname === "/api/ai-workflow/text-layer") {
-      sendJson(response, 200, await handleTextLayer(body));
+      sendJson(response, 200, await handleTextLayer(body, visitorToken), tokenHeader);
       return;
     }
     if (url.pathname === "/api/ai-workflow/config") {
@@ -1184,13 +1330,20 @@ async function route(request, response) {
 export { handleStickerBackgrounds, handleTextLayer, route, workflowStatus };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  createServer(route).listen(PORT, "127.0.0.1", () => {
-    console.log(`AI workflow local server listening on http://127.0.0.1:${PORT}`);
+  createServer(route).listen(PORT, HOST, () => {
+    console.log(`AI workflow server listening on http://${HOST}:${PORT}`);
     console.log(`OpenAI base URL: ${openAIBaseUrl()}`);
     console.log(`Image model: ${IMAGE_MODEL}`);
     console.log(`Image timeout: ${IMAGE_TIMEOUT_MS}ms`);
     console.log(`Image edit field: ${imageEditField()}`);
     console.log(`Generation mode: ${GENERATION_MODE}`);
     console.log(`OpenAI key: ${openAIKey() ? "configured" : "missing, local SVG fallback enabled"}`);
+    if (QUOTA_ENABLED) {
+      console.log(`Quota mode: ON — ${QUOTA_CALLS} official calls/visitor, then fallback to ${FALLBACK_PROVIDER_LABEL} (${FALLBACK_OPENAI_BASE_URL})`);
+      console.log(`Fallback key: ${FALLBACK_OPENAI_API_KEY ? "configured" : "MISSING — exhausted visitors will fail"}`);
+      console.log(`Quota store: ${fileURLToPath(QUOTA_STORE_PATH)}`);
+    } else {
+      console.log(`Quota mode: OFF — single global provider (legacy behavior)`);
+    }
   });
 }
