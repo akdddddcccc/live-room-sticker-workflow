@@ -45,6 +45,13 @@
       fontReferenceName: this.lang === "zh" ? "未上传字体参考图" : "No font reference uploaded",
       fontReferenceUrl: "",
       fontReferenceDataUrl: "",
+      topStickerUploadName: this.lang === "zh" ? "未上传上贴" : "No top sticker uploaded",
+      topStickerUploadUrl: "",
+      topStickerUpload: "",
+      topStickerUploadObjectUrl: "",
+      sideUploadName: this.lang === "zh" ? "未上传侧贴" : "No side sticker uploaded",
+      sideUploadUrl: "",
+      sideUploadObjectUrl: "",
       fontPresetReferenceDataUrls: {},
       fontPresetReferenceUrls: {},
       liveRoomUrl: "",
@@ -135,6 +142,10 @@
           referenceReady: "参考图已载入，可重新上传或粘贴替换",
           uploadOptional: "上传参考图（非必需）",
           uploadFontReference: "上传字体参考图（非必需）",
+          uploadTopSticker: "上传上贴（可独立生成文字层）",
+          topStickerUploadReady: "已载入独立上贴，本次文字层将基于它生成",
+          uploadSideSticker: "上传 / 替换侧贴图",
+          sideUploadReady: "侧贴已替换为上传图，置入和导出都会使用它",
           uploadLiveRoom: "上传无贴片直播间截图",
           pasteHint: "支持Ctrl+V 粘贴图片",
           prompt: "描述引导（非必填）",
@@ -143,7 +154,7 @@
           textReferenceTop: "文字颜色、材质和周围小装饰继承第一步生成的上贴背景；字体参考图只学习字形、笔势和字面质感，不学习背景、颜色和其他元素。",
           extractReferenceTextStyle: "从第一步参考图提取文字风格",
           extractReferenceTextStyleHint: "仅在参考图里有可用文字时打开；只学习字形气质，不复制文案、背景和颜色。",
-          textNeedsTop: "请先完成第一步，生成上贴背景后再生成文字层。",
+          textNeedsTop: "请先生成上贴背景，或在本步单独上传一张上贴后再生成文字层。",
           fontReferenceReady: "字体参考图已载入，只作为字形和局部质感参考",
           whiteDraft: "白底字体稿",
           run: "执行当前步骤",
@@ -194,6 +205,10 @@
           referenceReady: "Reference loaded. Upload or paste again to replace it.",
           uploadOptional: "Upload reference (optional)",
           uploadFontReference: "Upload font reference (optional)",
+          uploadTopSticker: "Upload top sticker (run step 2 standalone)",
+          topStickerUploadReady: "Standalone top sticker loaded. The text layer will be built from it.",
+          uploadSideSticker: "Upload / replace side sticker",
+          sideUploadReady: "Side sticker replaced with the upload. Placement and export will use it.",
           uploadLiveRoom: "Upload live-room screenshot without stickers",
           pasteHint: "Supports Ctrl+V image paste",
           prompt: "Prompt guidance (optional)",
@@ -202,7 +217,7 @@
           textReferenceTop: "Typography color, material, and small surrounding accents inherit from the top sticker generated in step 1. The optional font reference only guides letter shape, stroke rhythm, and face texture.",
           extractReferenceTextStyle: "Extract text style from step-1 reference",
           extractReferenceTextStyleHint: "Enable only when the first reference contains useful lettering. It learns typography mood only, not copy, background, or color.",
-          textNeedsTop: "Generate the top sticker in step 1 before creating the text layer.",
+          textNeedsTop: "Generate the top sticker in step 1, or upload one here, before creating the text layer.",
           fontReferenceReady: "Font reference loaded. It only guides letterform and local texture.",
           whiteDraft: "White draft",
           run: "Run current step",
@@ -375,6 +390,8 @@
     window.clearInterval(this.loadingTimer);
     if (this.referenceObjectUrl) URL.revokeObjectURL(this.referenceObjectUrl);
     if (this.fontReferenceObjectUrl) URL.revokeObjectURL(this.fontReferenceObjectUrl);
+    if (this.topStickerUploadObjectUrl) URL.revokeObjectURL(this.topStickerUploadObjectUrl);
+    if (this.sideUploadObjectUrl) URL.revokeObjectURL(this.sideUploadObjectUrl);
     if (this.liveRoomObjectUrl) URL.revokeObjectURL(this.liveRoomObjectUrl);
     window.removeEventListener("resize", this.resizeCompositionForDisplay);
     window.removeEventListener("pointermove", this.moveOverlayInteraction);
@@ -487,6 +504,8 @@
     uploadTargetFromViewport() {
       const candidates = [
         ["liveRoom", "aiWorkflowLiveRoom"],
+        ["sideSticker", "aiWorkflowSideSticker"],
+        ["topSticker", "aiWorkflowTopSticker"],
         ["font", "aiWorkflowFontReference"],
         ["reference", "aiWorkflowReference"]
       ];
@@ -509,6 +528,14 @@
     async setImageForTarget(target, file, fallbackName = "") {
       if (target === "font") {
         await this.setFontReferenceFile(file, fallbackName);
+        return;
+      }
+      if (target === "topSticker") {
+        await this.setTopStickerUploadFile(file, fallbackName);
+        return;
+      }
+      if (target === "sideSticker") {
+        await this.setSideStickerUploadFile(file, fallbackName);
         return;
       }
       if (target === "liveRoom") {
@@ -550,6 +577,42 @@
       this.fontReferenceName = file.name || fallbackName;
       this.fontReferenceDataUrl = await this.fileToDataUrl(file);
       this.statusText = this.lang === "zh" ? "字体参考图已载入" : "Font reference loaded";
+    },
+    async loadTopStickerUpload(event) {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      this.setUploadTarget("topSticker");
+      await this.setTopStickerUploadFile(file);
+      event.target.value = "";
+    },
+    async setTopStickerUploadFile(file, fallbackName = "") {
+      if (this.topStickerUploadObjectUrl) URL.revokeObjectURL(this.topStickerUploadObjectUrl);
+      this.topStickerUploadObjectUrl = URL.createObjectURL(file);
+      this.topStickerUploadUrl = this.topStickerUploadObjectUrl;
+      this.topStickerUpload = await this.fileToDataUrl(file);
+      this.topStickerUploadName = file.name || fallbackName;
+      this.textLayerVerified = false;
+      this.statusText = this.lang === "zh" ? "独立上贴已载入，可直接生成文字层" : "Standalone top sticker loaded";
+    },
+    async loadSideStickerUpload(event) {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      this.setUploadTarget("sideSticker");
+      await this.setSideStickerUploadFile(file);
+      event.target.value = "";
+    },
+    async setSideStickerUploadFile(file, fallbackName = "") {
+      if (this.sideUploadObjectUrl) URL.revokeObjectURL(this.sideUploadObjectUrl);
+      this.sideUploadObjectUrl = URL.createObjectURL(file);
+      this.sideUploadUrl = this.sideUploadObjectUrl;
+      this.sideUploadName = file.name || fallbackName;
+      this.stickerOutputs = { ...this.stickerOutputs, side: await this.fileToDataUrl(file) };
+      const size = await this.readImageSize(this.sideUploadUrl).catch(() => null);
+      if (size) {
+        this.stickerOutputSizes = { ...this.stickerOutputSizes, side: size };
+      }
+      this.assets[2].ready = true;
+      this.statusText = this.lang === "zh" ? "侧贴已替换为上传图" : "Side sticker replaced with the upload";
     },
     async loadLiveRoom(event) {
       const file = event.target.files?.[0];
@@ -738,7 +801,8 @@
       return /^data:image\/(?:png|jpeg|webp);base64,/i.test(source || "") ? source : "";
     },
     async runTextLayer() {
-      if (!this.stickerOutputs.top) {
+      const topSource = this.stickerOutputs.top || this.topStickerUpload;
+      if (!topSource) {
         this.statusText = this.labels.textNeedsTop;
         return;
       }
@@ -753,8 +817,8 @@
           styleKey: ["reference", "rounded"].includes(this.selectedFontStyle) ? "clean" : this.selectedFontStyle,
           fontPresetKey: this.fontPresetKeyForRun(),
           fontReferenceSource: this.selectedFontStyle === "reference" ? "upload" : "preset",
-          topStickerImage: this.stickerOutputs.top,
-          referenceImage: this.stickerOutputs.top,
+          topStickerImage: topSource,
+          referenceImage: topSource,
           fontReferenceImage,
           sourceTypographyReferenceImage: "",
           useReferenceTextStyle: this.extractTextStyleFromReference
@@ -1543,6 +1607,25 @@
                 <h3>{{ labels.prototypeInput }}</h3>
               </div>
             </div>
+            <label
+              v-if="!stickerOutputs.top"
+              class="ai-workflow-upload ai-workflow-upload--short"
+              :class="{ ready: topStickerUpload, active: activeUploadTarget === 'topSticker' }"
+              for="aiWorkflowTopSticker"
+              tabindex="0"
+              @focus="setUploadTarget('topSticker')"
+              @pointerdown="setUploadTarget('topSticker')"
+              @pointerenter="setHoverUploadTarget('topSticker')"
+              @pointerleave="clearHoverUploadTarget('topSticker')"
+            >
+              <input id="aiWorkflowTopSticker" type="file" accept="image/*" @change="loadTopStickerUpload" />
+              <img v-if="topStickerUploadUrl" :src="topStickerUploadUrl" alt="Top sticker upload preview" />
+              <strong v-else>+</strong>
+              <span>{{ labels.uploadTopSticker }}</span>
+              <small>{{ topStickerUploadName }}</small>
+              <small>{{ labels.pasteHint }}</small>
+              <em v-if="topStickerUpload">{{ labels.topStickerUploadReady }}</em>
+            </label>
             <label class="ai-workflow-field">
               <span>{{ labels.textContent }}</span>
               <textarea v-model="copyText" rows="5"></textarea>
@@ -1663,6 +1746,24 @@
               <span>{{ labels.uploadLiveRoom }}</span>
               <small>{{ liveRoomName }}</small>
               <small>{{ labels.pasteHint }}</small>
+            </label>
+            <label
+              class="ai-workflow-upload ai-workflow-upload--short"
+              :class="{ ready: sideUploadUrl, active: activeUploadTarget === 'sideSticker' }"
+              for="aiWorkflowSideSticker"
+              tabindex="0"
+              @focus="setUploadTarget('sideSticker')"
+              @pointerdown="setUploadTarget('sideSticker')"
+              @pointerenter="setHoverUploadTarget('sideSticker')"
+              @pointerleave="clearHoverUploadTarget('sideSticker')"
+            >
+              <input id="aiWorkflowSideSticker" type="file" accept="image/*" @change="loadSideStickerUpload" />
+              <img v-if="sideUploadUrl || stickerOutputs.side" :src="sideUploadUrl || stickerOutputs.side" alt="Side sticker upload preview" />
+              <strong v-else>+</strong>
+              <span>{{ labels.uploadSideSticker }}</span>
+              <small>{{ sideUploadName }}</small>
+              <small>{{ labels.pasteHint }}</small>
+              <em v-if="sideUploadUrl">{{ labels.sideUploadReady }}</em>
             </label>
           </div>
 

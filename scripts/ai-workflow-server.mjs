@@ -46,7 +46,7 @@ function activeProvider() {
 }
 const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || "gpt-image-2";
 const IMAGE_QUALITY = process.env.OPENAI_IMAGE_QUALITY || "low";
-const IMAGE_OUTPUT_FORMAT = process.env.OPENAI_IMAGE_OUTPUT_FORMAT || "png";
+const IMAGE_OUTPUT_FORMAT = process.env.OPENAI_IMAGE_OUTPUT_FORMAT || "jpeg";
 const TEXT_LAYER_OUTPUT_FORMAT = process.env.OPENAI_TEXT_LAYER_OUTPUT_FORMAT || "png";
 const DEFAULT_IMAGE_USE_EDITS = process.env.OPENAI_IMAGE_USE_EDITS !== "0";
 const IMAGE_TIMEOUT_MS = Number(process.env.OPENAI_IMAGE_TIMEOUT_MS || 90000);
@@ -406,9 +406,9 @@ async function requestOpenAIImage({ prompt, size, referenceImage, referenceImage
         body.append("model", IMAGE_MODEL);
         body.append("prompt", prompt);
         body.append("size", editSize || IMAGE_EDIT_SIZE || size);
+        body.append("output_format", outputFormat);
         if (IMAGE_EDIT_INCLUDE_EXTRAS) {
           body.append("quality", IMAGE_QUALITY);
-          body.append("output_format", outputFormat);
         }
         imageFiles.forEach((imageFile, index) => {
           body.append(imageEditField(), imageFile, imageFile.name || `reference-${index + 1}.png`);
@@ -466,7 +466,8 @@ async function parseOpenAIImageResponse(response) {
   const imageUrl = data?.data?.[0]?.url;
   if (imageUrl) return imageUrl;
   if (!imageBase64) throw new Error("OpenAI did not return image data.");
-  return `data:image/png;base64,${imageBase64}`;
+  const mime = sniffImageMime(Buffer.from(imageBase64.slice(0, 24), "base64")) || "image/png";
+  return `data:${mime};base64,${imageBase64}`;
 }
 
 async function imageUrlToDataUrl(imageUrl) {
@@ -1112,14 +1113,17 @@ async function handleTextLayer(body, token = "") {
       : "",
     "The top sticker reference always wins for material direction and small surrounding decorative elements.",
     "Palette isolation: the original uploaded source image and any typography reference must never affect lettering color. They may not introduce old colors, previous palettes, background tones, product colors, or scene lighting into the new text layer.",
-    "Contrast-first color adaptation: first judge whether the usable top-sticker background/ornament area is light or dark, ignoring pure white fade zones. If the top sticker reads light, pale, airy, or white-heavy, the main lettering fill must be deep charcoal, near-black, ink black, or another very dark neutral. If the top sticker reads dark, saturated, or heavy, the main lettering fill must be warm white, ivory, pearl, or another very light neutral.",
-    "This light/dark decision controls only color and small decorative elements, not the letterform route, font structure, copy, layout hierarchy, or stroke style.",
-    "Use Reference image 1/top sticker colors only for tiny accent strokes, sparkles, outlines, edge glints, shadows, or small attached ornaments. Do not use top-sticker accent colors as the dominant main letter fill when they reduce contrast.",
-    "Color lock: choose lettering fill from the contrast-first dark/bright neutral rule above. Choose outline, shadow, highlights, edge effects, and small accent strokes from Reference image 1/top sticker only when they help readability and local harmony. Never borrow the color palette from a font reference or typography preset.",
+    "Poster-style tonal blending (融字): the lettering must feel painted into the same world as the top sticker, not pasted on as a flat neutral. First read the dominant hue and the light/dark level of the usable top-sticker background/ornament area, ignoring the pure white fade zones.",
+    "Same-hue derivation: pull the main lettering fill from that dominant hue family, then shift it strongly along the SAME hue until it reads clearly against the background. If the top sticker is light/pale, deepen and slightly desaturate the hue into a rich dark tone of that same family (e.g. burgundy/red background -> deep wine, oxblood, ink-red lettering; sage/forest green -> deep pine or ink-green; dusty blue -> deep navy-ink). If the top sticker is dark/saturated/heavy, lift the hue into a warm light tone of the same family (e.g. deep green -> warm ivory with a faint green cast; oxblood -> warm pearl with a faint rose cast).",
+    "Hard ban on flat neutrals: never use pure black #000000 or pure white #ffffff as the main lettering fill, and avoid dead grey. The fill must always carry a trace of the background hue so the type harmonizes with the scene.",
+    "Readability guarantee comes first: keep shifting the derived hue deeper (on light backgrounds) or lighter (on dark backgrounds) until the lettering is unmistakably legible. The text must never be swallowed by the background. If a hue cannot reach enough contrast while staying tasteful, push it to a near-extreme dark or light tone of that hue (still not pure black/white).",
+    "This color decision controls only fill color and small decorative elements, not the letterform route, font structure, copy, layout hierarchy, or stroke style.",
+    "Use Reference image 1/top sticker accent colors for outlines, shadows, edge glints, sparkles, and small attached ornaments so the type and background share materials. Do not let a low-contrast accent become the dominant main fill.",
+    "Color lock: derive the main fill from the same-hue tonal rule above; derive outline, shadow, highlights, edge effects, and small accent strokes from Reference image 1/top sticker only when they help readability and local harmony. Never borrow the color palette from a font reference or typography preset.",
     "Letterform lock: the selected typography route controls silhouette, stroke structure, serif/brush/rounded character, and spacing. The top sticker reference must not collapse different typography routes into the same font style.",
     "The optional font reference never decides the background, global color, large ornaments, or non-text visual content.",
     "Do not recreate large color blocks, ribbons, watercolor backgrounds, geometric networks, poster scenes, people, products, logos, QR codes, labels, captions, slogans, signatures, or watermarks.",
-    "Before rendering, explicitly apply the contrast decision: light top sticker -> dark/black typography; dark top sticker -> light/white typography. Keep the decorative color details secondary.",
+    "Before rendering, explicitly apply the tonal decision: light top sticker -> deep same-hue typography; dark top sticker -> light same-hue typography; never flat black or white. Keep the decorative color details secondary.",
     "必须逐字保留以下原文案，不增删、不翻译、不改写，保留换行结构：",
     copyText,
     styleKey === "expressive"

@@ -1175,6 +1175,10 @@ a {
   min-height: 520px;
 }
 
+.ai-workflow-step--fusion .ai-workflow-upload--tall {
+  min-height: 380px;
+}
+
 .ai-workflow-upload input {
   position: absolute;
   width: 1px;
